@@ -171,6 +171,45 @@ rcl_subscription_init(
   const rcl_subscription_options_t * options
 );
 
+/// Initialize a subscription with message type constraints.
+/**
+ * Same as rcl_subscription_init(), but with additional constraints on the
+ * message type that the middleware may use to optimize allocation and transport,
+ * including message loaning support.
+ *
+ * If no constraints are given, this function is equivalent to rcl_subscription_init().
+ *
+ * <hr>
+ * Attribute          | Adherence
+ * ------------------ | -------------
+ * Allocates Memory   | Yes
+ * Thread-Safe        | No
+ * Uses Atomics       | No
+ * Lock-Free          | Yes
+ *
+ * \param[out] subscription preallocated subscription structure
+ * \param[in] node valid rcl node handle
+ * \param[in] type_support type support object for the topic's type
+ * \param[in] type_constraints optional constraints on the message type (may be `NULL`)
+ * \param[in] topic_name the name of the topic to subscribe on
+ * \param[in] options subscription options, including quality of service settings
+ * \return #RCL_RET_OK if the subscription was initialized successfully, or
+ * \return #RCL_RET_INVALID_ARGUMENT if any arguments are invalid, or
+ * \return #RCL_RET_BAD_ALLOC if allocating memory failed, or
+ * \return #RCL_RET_ERROR if an unspecified error occurs.
+ */
+RCL_PUBLIC
+RCL_WARN_UNUSED
+rcl_ret_t
+rcl_subscription_init_with_constraints(
+  rcl_subscription_t * subscription,
+  const rcl_node_t * node,
+  const rosidl_message_type_support_t * type_support,
+  const rosidl_message_type_constraints_t * type_constraints,
+  const char * topic_name,
+  const rcl_subscription_options_t * options
+);
+
 /// Finalize a rcl_subscription_t.
 /**
  * After calling, the node will no longer be subscribed on this topic
@@ -489,6 +528,8 @@ rcl_subscription_get_content_filter(
  * \return #RCL_RET_INVALID_ARGUMENT if any arguments are invalid, or
  * \return #RCL_RET_SUBSCRIPTION_INVALID if the subscription is invalid, or
  * \return #RCL_RET_BAD_ALLOC if allocating memory failed, or
+ * \return #RCL_RET_CONSTRAINTS_HIT if the message would have exceeded
+ *         subscription-wide constraints, if any, or
  * \return #RCL_RET_SUBSCRIPTION_TAKE_FAILED if take failed but no error
  *         occurred in the middleware, or
  * \return #RCL_RET_ERROR if an unspecified error occurs.
@@ -540,6 +581,8 @@ rcl_take(
  * \return #RCL_RET_INVALID_ARGUMENT if any arguments are invalid, or
  * \return #RCL_RET_SUBSCRIPTION_INVALID if the subscription is invalid, or
  * \return #RCL_RET_BAD_ALLOC if allocating memory failed, or
+ * \return #RCL_RET_CONSTRAINTS_HIT if any message in the sequence would have
+ *         exceeded subscription-wide constraints, if any, or
  * \return #RCL_RET_SUBSCRIPTION_TAKE_FAILED if take failed but no error
  *         occurred in the middleware, or
  * \return #RCL_RET_ERROR if an unspecified error occurs.
@@ -587,6 +630,8 @@ rcl_take_sequence(
  * \return #RCL_RET_INVALID_ARGUMENT if any arguments are invalid, or
  * \return #RCL_RET_SUBSCRIPTION_INVALID if the subscription is invalid, or
  * \return #RCL_RET_BAD_ALLOC if allocating memory failed, or
+ * \return #RCL_RET_CONSTRAINTS_HIT if the message would have exceeded
+ *         subscription-wide constraints, if any, or
  * \return #RCL_RET_SUBSCRIPTION_TAKE_FAILED if take failed but no error
  *         occurred in the middleware, or
  * \return #RCL_RET_ERROR if an unspecified error occurs.
@@ -625,6 +670,8 @@ rcl_take_serialized_message(
  * \return #RCL_RET_INVALID_ARGUMENT if any arguments are invalid, or
  * \return #RCL_RET_SUBSCRIPTION_INVALID if the subscription is invalid, or
  * \return #RCL_RET_BAD_ALLOC if allocating memory failed, or
+ * \return #RCL_RET_CONSTRAINTS_HIT if the message would have exceeded
+ *         subscription-wide constraints, if any, or
  * \return #RCL_RET_SUBSCRIPTION_TAKE_FAILED if take failed but no error
  *         occurred in the middleware, or
  * \return #RCL_RET_ERROR if an unspecified error occurs.
@@ -662,6 +709,8 @@ rcl_take_dynamic_message(
  * \return #RCL_RET_INVALID_ARGUMENT if any arguments are invalid, or
  * \return #RCL_RET_SUBSCRIPTION_INVALID if the subscription is invalid, or
  * \return #RCL_RET_BAD_ALLOC if allocating memory failed, or
+ * \return #RCL_RET_CONSTRAINTS_HIT if the message would have exceeded
+ *         subscription-wide constraints, if any, or
  * \return #RCL_RET_SUBSCRIPTION_TAKE_FAILED if take failed but no error
  *         occurred in the middleware, or
  * \return #RCL_RET_UNSUPPORTED if the middleware does not support that feature, or
@@ -672,6 +721,49 @@ RCL_WARN_UNUSED
 rcl_ret_t
 rcl_take_loaned_message(
   const rcl_subscription_t * subscription,
+  void ** loaned_message,
+  rmw_message_info_t * message_info,
+  rmw_subscription_allocation_t * allocation);
+
+/// Take a loaned message with optional constraints.
+/**
+ * Same as rcl_take_loaned_message() but with additional message type constraints.
+ * These constraints add to any constraints set on subscription initialization. Per loan
+ * constraints that are looser than subscription-wide constraints are effectively ignored.
+ *
+ * If no constraints are given, this function is equivalent to rcl_take_loaned_message().
+ *
+ * <hr>
+ * Attribute          | Adherence
+ * ------------------ | -------------
+ * Allocates Memory   | No
+ * Thread-Safe        | No
+ * Uses Atomics       | No
+ * Lock-Free          | Yes
+ *
+ * \param[in] subscription the handle to the subscription from which to take
+ * \param[in] type_constraints optional constraints on the message type (may be NULL)
+ * \param[inout] loaned_message a pointer to the loaned messages.
+ * \param[out] message_info rmw struct which contains meta-data for the message.
+ * \param[in] allocation structure pointer used for memory preallocation (may be NULL)
+ * \return #RCL_RET_OK if the loaned message sequence was taken, or
+ * \return #RCL_RET_INVALID_ARGUMENT if any arguments are invalid, or
+ * \return #RCL_RET_SUBSCRIPTION_INVALID if the subscription is invalid, or
+ * \return #RCL_RET_BAD_ALLOC if allocating memory failed, or
+ * \return #RCL_RET_CONSTRAINTS_HIT if the message would have exceeded constraints, or
+ * \return #RCL_RET_SUBSCRIPTION_TAKE_FAILED if take failed but no error
+ *         occurred in the middleware, or
+ * \return #RCL_RET_UNSUPPORTED if the middleware does not support that feature, or
+ * \return #RCL_RET_UNSUPPORTED if `message_constraints` conflicts with subscription-level
+ *   constraints, or
+ * \return #RCL_RET_ERROR if an unspecified error occurs.
+ */
+RCL_PUBLIC
+RCL_WARN_UNUSED
+rcl_ret_t
+rcl_take_loaned_message_with_constraints(
+  const rcl_subscription_t * subscription,
+  const rosidl_message_type_constraints_t * type_constraints,
   void ** loaned_message,
   rmw_message_info_t * message_info,
   rmw_subscription_allocation_t * allocation);

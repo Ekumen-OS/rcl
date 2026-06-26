@@ -38,6 +38,8 @@ rcl_convert_rmw_ret_to_rcl_ret(rmw_ret_t rmw_ret)
       return RCL_RET_UNSUPPORTED;
     case RMW_RET_NODE_NAME_NON_EXISTENT:
       return RCL_RET_NODE_NAME_NON_EXISTENT;
+    case RMW_RET_CONSTRAINTS_HIT:
+      return RCL_RET_CONSTRAINTS_HIT;
     default:
       return RCL_RET_ERROR;
   }

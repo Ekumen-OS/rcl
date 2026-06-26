@@ -52,6 +52,21 @@ rcl_publisher_init(
   const rcl_publisher_options_t * options
 )
 {
+  const rosidl_message_type_constraints_t * type_constraints = NULL;
+  return rcl_publisher_init_with_constraints(
+    publisher, node, type_support, type_constraints, topic_name, options);
+}
+
+rcl_ret_t
+rcl_publisher_init_with_constraints(
+  rcl_publisher_t * publisher,
+  const rcl_node_t * node,
+  const rosidl_message_type_support_t * type_support,
+  const rosidl_message_type_constraints_t * type_constraints,
+  const char * topic_name,
+  const rcl_publisher_options_t * options
+)
+{
   RCUTILS_CAN_RETURN_WITH_ERROR_OF(RCL_RET_INVALID_ARGUMENT);
   RCUTILS_CAN_RETURN_WITH_ERROR_OF(RCL_RET_ALREADY_INIT);
   RCUTILS_CAN_RETURN_WITH_ERROR_OF(RCL_RET_NODE_INVALID);
@@ -108,12 +123,22 @@ rcl_publisher_init(
   // Fill out implementation struct.
   // rmw handle (create rmw publisher)
   // TODO(wjwwood): pass along the allocator to rmw when it supports it
-  publisher->impl->rmw_handle = rmw_create_publisher(
-    rcl_node_get_rmw_handle(node),
-    type_support,
-    remapped_topic_name,
-    &(options->qos),
-    &(options->rmw_publisher_options));
+  if (NULL != type_constraints) {
+    publisher->impl->rmw_handle = rmw_create_publisher_with_constraints(
+      rcl_node_get_rmw_handle(node),
+      type_support,
+      type_constraints,
+      remapped_topic_name,
+      &(options->qos),
+      &(options->rmw_publisher_options));
+  } else {
+    publisher->impl->rmw_handle = rmw_create_publisher(
+      rcl_node_get_rmw_handle(node),
+      type_support,
+      remapped_topic_name,
+      &(options->qos),
+      &(options->rmw_publisher_options));
+  }
   RCL_CHECK_FOR_NULL_WITH_MSG(
     publisher->impl->rmw_handle, rmw_get_error_string().str, goto fail);
   // get actual qos, and store it
@@ -251,6 +276,21 @@ rcl_borrow_loaned_message(
   }
   return rcl_convert_rmw_ret_to_rcl_ret(
     rmw_borrow_loaned_message(publisher->impl->rmw_handle, type_support, ros_message));
+}
+
+rcl_ret_t
+rcl_borrow_loaned_message_with_constraints(
+  const rcl_publisher_t * publisher,
+  const rosidl_message_type_support_t * type_support,
+  const rosidl_message_type_constraints_t * type_constraints,
+  void ** ros_message)
+{
+  if (!rcl_publisher_is_valid(publisher)) {
+    return RCL_RET_PUBLISHER_INVALID;  // error already set
+  }
+  return rcl_convert_rmw_ret_to_rcl_ret(
+    rmw_borrow_loaned_message_with_constraints(
+      publisher->impl->rmw_handle, type_support, type_constraints, ros_message));
 }
 
 rcl_ret_t

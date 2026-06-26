@@ -55,6 +55,21 @@ rcl_subscription_init(
   const rcl_subscription_options_t * options
 )
 {
+  const rosidl_message_type_constraints_t * type_constraints = NULL;
+  return rcl_subscription_init_with_constraints(
+    subscription, node, type_support, type_constraints, topic_name, options);
+}
+
+rcl_ret_t
+rcl_subscription_init_with_constraints(
+  rcl_subscription_t * subscription,
+  const rcl_node_t * node,
+  const rosidl_message_type_support_t * type_support,
+  const rosidl_message_type_constraints_t * type_constraints,
+  const char * topic_name,
+  const rcl_subscription_options_t * options
+)
+{
   rcl_ret_t fail_ret = RCL_RET_ERROR;
 
   // Check options and allocator first, so the allocator can be used in errors.
@@ -102,12 +117,22 @@ rcl_subscription_init(
   // Fill out the implemenation struct.
   // rmw_handle
   // TODO(wjwwood): pass allocator once supported in rmw api.
-  subscription->impl->rmw_handle = rmw_create_subscription(
-    rcl_node_get_rmw_handle(node),
-    type_support,
-    remapped_topic_name,
-    &(options->qos),
-    &(options->rmw_subscription_options));
+  if (NULL != type_constraints) {
+    subscription->impl->rmw_handle = rmw_create_subscription_with_constraints(
+      rcl_node_get_rmw_handle(node),
+      type_support,
+      type_constraints,
+      remapped_topic_name,
+      &(options->qos),
+      &(options->rmw_subscription_options));
+  } else {
+    subscription->impl->rmw_handle = rmw_create_subscription(
+      rcl_node_get_rmw_handle(node),
+      type_support,
+      remapped_topic_name,
+      &(options->qos),
+      &(options->rmw_subscription_options));
+  }
   if (!subscription->impl->rmw_handle) {
     RCL_SET_ERROR_MSG(rmw_get_error_string().str);
     goto fail;
@@ -690,33 +715,9 @@ rcl_take_loaned_message(
   rmw_message_info_t * message_info,
   rmw_subscription_allocation_t * allocation)
 {
-  RCUTILS_LOG_DEBUG_NAMED(ROS_PACKAGE_NAME, "Subscription taking loaned message");
-  if (!rcl_subscription_is_valid(subscription)) {
-    return RCL_RET_SUBSCRIPTION_INVALID;  // error already set
-  }
-  RCL_CHECK_ARGUMENT_FOR_NULL(loaned_message, RCL_RET_INVALID_ARGUMENT);
-  if (*loaned_message) {
-    RCL_SET_ERROR_MSG("loaned message is already initialized");
-    return RCL_RET_INVALID_ARGUMENT;
-  }
-  // If message_info is NULL, use a place holder which can be discarded.
-  rmw_message_info_t dummy_message_info;
-  rmw_message_info_t * message_info_local = message_info ? message_info : &dummy_message_info;
-  *message_info_local = rmw_get_zero_initialized_message_info();
-  // Call rmw_take_with_info.
-  bool taken = false;
-  rmw_ret_t ret = rmw_take_loaned_message_with_info(
-    subscription->impl->rmw_handle, loaned_message, &taken, message_info_local, allocation);
-  if (ret != RMW_RET_OK) {
-    RCL_SET_ERROR_MSG(rmw_get_error_string().str);
-    return rcl_convert_rmw_ret_to_rcl_ret(ret);
-  }
-  RCUTILS_LOG_DEBUG_NAMED(
-    ROS_PACKAGE_NAME, "Subscription loaned take succeeded: %s", taken ? "true" : "false");
-  if (!taken) {
-    return RCL_RET_SUBSCRIPTION_TAKE_FAILED;
-  }
-  return RCL_RET_OK;
+  const rosidl_message_type_constraints_t * type_constraints = NULL;
+  return rcl_take_loaned_message_with_constraints(
+    subscription, type_constraints, loaned_message, message_info, allocation);
 }
 
 rcl_ret_t
@@ -732,6 +733,51 @@ rcl_return_loaned_message_from_subscription(
   return rcl_convert_rmw_ret_to_rcl_ret(
     rmw_return_loaned_message_from_subscription(
       subscription->impl->rmw_handle, loaned_message));
+}
+
+rcl_ret_t
+rcl_take_loaned_message_with_constraints(
+  const rcl_subscription_t * subscription,
+  const rosidl_message_type_constraints_t * type_constraints,
+  void ** loaned_message,
+  rmw_message_info_t * message_info,
+  rmw_subscription_allocation_t * allocation)
+{
+  RCUTILS_LOG_DEBUG_NAMED(ROS_PACKAGE_NAME, "Subscription taking loaned message with constraints");
+  if (!rcl_subscription_is_valid(subscription)) {
+    return RCL_RET_SUBSCRIPTION_INVALID;  // error already set
+  }
+  RCL_CHECK_ARGUMENT_FOR_NULL(loaned_message, RCL_RET_INVALID_ARGUMENT);
+  if (*loaned_message) {
+    RCL_SET_ERROR_MSG("loaned message is already initialized");
+    return RCL_RET_INVALID_ARGUMENT;
+  }
+  // If message_info is NULL, use a place holder which can be discarded.
+  rmw_message_info_t dummy_message_info;
+  rmw_message_info_t * message_info_local = message_info ? message_info : &dummy_message_info;
+  *message_info_local = rmw_get_zero_initialized_message_info();
+  // Call rmw_take_loaned_message_with_info_and_constraints.
+  bool taken = false;
+  rmw_ret_t ret = RMW_RET_OK;
+  if (NULL != type_constraints) {
+    ret = rmw_take_loaned_message_with_info_and_constraints(
+      subscription->impl->rmw_handle, type_constraints, loaned_message, &taken,
+      message_info_local, allocation);
+  } else {
+    ret = rmw_take_loaned_message_with_info(
+      subscription->impl->rmw_handle, loaned_message, &taken,
+      message_info_local, allocation);
+  }
+  if (ret != RMW_RET_OK) {
+    RCL_SET_ERROR_MSG(rmw_get_error_string().str);
+    return rcl_convert_rmw_ret_to_rcl_ret(ret);
+  }
+  RCUTILS_LOG_DEBUG_NAMED(
+    ROS_PACKAGE_NAME, "Subscription loaned take succeeded: %s", taken ? "true" : "false");
+  if (!taken) {
+    return RCL_RET_SUBSCRIPTION_TAKE_FAILED;
+  }
+  return RCL_RET_OK;
 }
 
 const char *

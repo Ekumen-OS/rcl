@@ -35,6 +35,8 @@ typedef rmw_ret_t rcl_ret_t;
 #define RCL_RET_INVALID_ARGUMENT RMW_RET_INVALID_ARGUMENT
 /// Unsupported return code.
 #define RCL_RET_UNSUPPORTED RMW_RET_UNSUPPORTED
+/// Constraints hit return code.
+#define RCL_RET_CONSTRAINTS_HIT RMW_RET_CONSTRAINTS_HIT
 
 // rcl specific ret codes start at 100
 /// rcl_init() already called return code.

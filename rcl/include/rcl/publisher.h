@@ -160,6 +160,44 @@ rcl_publisher_init(
   const char * topic_name,
   const rcl_publisher_options_t * options);
 
+/// Initialize a publisher with message type constraints.
+/**
+ * Same as rcl_publisher_init(), but with additional constraints on the
+ * message type that the middleware may use to optimize allocation and transport,
+ * including message loaning support.
+ *
+ * If no constraints are given, this function is equivalent to rcl_publisher_init().
+ *
+ * <hr>
+ * Attribute          | Adherence
+ * ------------------ | -------------
+ * Allocates Memory   | Yes
+ * Thread-Safe        | No
+ * Uses Atomics       | No
+ * Lock-Free          | Yes
+ *
+ * \param[inout] publisher preallocated publisher structure
+ * \param[in] node valid rcl node handle
+ * \param[in] type_support type support object for the topic's type
+ * \param[in] type_constraints optional constraints on the message type (may be `NULL`)
+ * \param[in] topic_name the name of the topic to publish on
+ * \param[in] options publisher options, including quality of service settings
+ * \return #RCL_RET_OK if the publisher was initialized successfully, or
+ * \return #RCL_RET_INVALID_ARGUMENT if any arguments are invalid, or
+ * \return #RCL_RET_BAD_ALLOC if allocating memory failed, or
+ * \return #RCL_RET_ERROR if an unspecified error occurs.
+ */
+RCL_PUBLIC
+RCL_WARN_UNUSED
+rcl_ret_t
+rcl_publisher_init_with_constraints(
+  rcl_publisher_t * publisher,
+  const rcl_node_t * node,
+  const rosidl_message_type_support_t * type_support,
+  const rosidl_message_type_constraints_t * type_constraints,
+  const char * topic_name,
+  const rcl_publisher_options_t * options);
+
 /// Finalize a rcl_publisher_t.
 /**
  * After calling, the node will no longer be advertising that it is publishing
@@ -236,6 +274,45 @@ rcl_ret_t
 rcl_borrow_loaned_message(
   const rcl_publisher_t * publisher,
   const rosidl_message_type_support_t * type_support,
+  void ** ros_message);
+
+/// Borrow a loaned message with optional constraints.
+/**
+ * Same as rcl_borrow_loaned_message() but with additional message type constraints.
+ * These constraints add to any constraints set on publisher initialization. Per loan
+ * constraints may not be looser than publisher-wide constraints.
+ *
+ * If no constraints are given, this function is equivalent to rcl_borrow_loaned_message().
+ *
+ * <hr>
+ * Attribute          | Adherence
+ * ------------------ | -------------
+ * Allocates Memory   | No
+ * Thread-Safe        | No
+ * Uses Atomics       | No
+ * Lock-Free          | Yes
+ *
+ * \param[in] publisher Publisher to which the allocated message is associated.
+ * \param[in] type_support Typesupport to which the internal ros message is allocated.
+ * \param[in] type_constraints Optional constraints on the message type (may be NULL).
+ * \param[out] ros_message The pointer to be filled to a valid ros message by the middleware.
+ * \return #RCL_RET_OK if the ros message was correctly initialized, or
+ * \return #RCL_RET_PUBLISHER_INVALID if the passed publisher is invalid, or
+ * \return #RCL_RET_INVALID_ARGUMENT if an argument other than the ros message is null, or
+ * \return #RCL_RET_BAD_ALLOC if the ros message could not be correctly created, or
+ * \return #RCL_RET_CONSTRAINTS_HIT if given constraints are looser than publisher-wide constraints, or
+ * \return #RCL_RET_UNSUPPORTED if the middleware does not support that feature, or
+ * \return #RCL_RET_UNSUPPORTED if `type_constraints` conflicts with publisher-level
+ *   constraints, or
+ * \return #RCL_RET_ERROR if an unexpected error occured.
+ */
+RCL_PUBLIC
+RCL_WARN_UNUSED
+rcl_ret_t
+rcl_borrow_loaned_message_with_constraints(
+  const rcl_publisher_t * publisher,
+  const rosidl_message_type_support_t * type_support,
+  const rosidl_message_type_constraints_t * type_constraints,
   void ** ros_message);
 
 /// Return a loaned message previously borrowed from a publisher.
