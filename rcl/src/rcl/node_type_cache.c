@@ -143,8 +143,6 @@ rcl_ret_t rcl_node_type_cache_register_type(
   RCL_CHECK_ARGUMENT_FOR_NULL(node, RCL_RET_INVALID_ARGUMENT);
   RCL_CHECK_ARGUMENT_FOR_NULL(node->impl, RCL_RET_NODE_INVALID);
   RCL_CHECK_ARGUMENT_FOR_NULL(type_hash, RCL_RET_INVALID_ARGUMENT);
-  RCL_CHECK_ARGUMENT_FOR_NULL(type_description, RCL_RET_INVALID_ARGUMENT);
-  RCL_CHECK_ARGUMENT_FOR_NULL(type_description_sources, RCL_RET_INVALID_ARGUMENT);
 
   rcl_type_info_with_registration_count_t type_info_with_registrations;
 
@@ -161,21 +159,33 @@ rcl_ret_t rcl_node_type_cache_register_type(
     type_info_with_registrations.num_registrations = 1;
 
     // Convert type description struct to type description message struct.
-    type_info_with_registrations.type_info.type_description =
-      rcl_convert_type_description_runtime_to_msg(type_description);
-    if (type_info_with_registrations.type_info.type_description == NULL) {
-      // rcl_convert_type_description_runtime_to_msg already does rcutils_set_error
-      return RCL_RET_ERROR;
+    // null is accepted (no type description available).
+    if (type_description) {
+      type_info_with_registrations.type_info.type_description =
+        rcl_convert_type_description_runtime_to_msg(type_description);
+      if (type_info_with_registrations.type_info.type_description == NULL) {
+        // rcl_convert_type_description_runtime_to_msg already does rcutils_set_error
+        return RCL_RET_ERROR;
+      }
+    } else {
+      type_info_with_registrations.type_info.type_description = NULL;
     }
 
     // Convert type sources struct to type sources message struct.
-    type_info_with_registrations.type_info.type_sources =
-      rcl_convert_type_source_sequence_runtime_to_msg(type_description_sources);
-    if (type_info_with_registrations.type_info.type_sources == NULL) {
-      // rcl_convert_type_source_sequence_runtime_to_msg already does rcutils_set_error
-      type_description_interfaces__msg__TypeDescription__destroy(
-        type_info_with_registrations.type_info.type_description);
-      return RCL_RET_ERROR;
+    // null is accepted (no type sources available).
+    if (type_description_sources) {
+      type_info_with_registrations.type_info.type_sources =
+        rcl_convert_type_source_sequence_runtime_to_msg(type_description_sources);
+      if (type_info_with_registrations.type_info.type_sources == NULL) {
+        // rcl_convert_type_source_sequence_runtime_to_msg already does rcutils_set_error
+        if (type_info_with_registrations.type_info.type_description) {
+          type_description_interfaces__msg__TypeDescription__destroy(
+            type_info_with_registrations.type_info.type_description);
+        }
+        return RCL_RET_ERROR;
+      }
+    } else {
+      type_info_with_registrations.type_info.type_sources = NULL;
     }
   } else {
     return RCL_RET_ERROR;
