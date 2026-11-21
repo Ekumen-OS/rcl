@@ -66,6 +66,19 @@ rcl_subscription_init(
   const rcl_subscription_options_t * options
 )
 {
+  return rcl_subscription_init_with_context(
+    subscription, node, type_support, NULL, topic_name, options);
+}
+
+rcl_ret_t
+rcl_subscription_init_with_context(
+  rcl_subscription_t * subscription,
+  const rcl_node_t * node,
+  const rosidl_message_type_support_t * type_support,
+  const rosidl_runtime_c__message_context_t * context,
+  const char * topic_name,
+  const rcl_subscription_options_t * options)
+{
   rcl_ret_t fail_ret = RCL_RET_ERROR;
 
   // Check options and allocator first, so the allocator can be used in errors.
@@ -117,12 +130,15 @@ rcl_subscription_init(
 
   // Fill out the implemenation struct.
   // TODO(wjwwood): pass allocator once supported in rmw api.
-  subscription->impl->rmw_handle = rmw_create_subscription(
-    rcl_node_get_rmw_handle(node),
-    type_support,
-    remapped_topic_name,
-    &(options->qos),
-    &(options->rmw_subscription_options));
+  if (context) {
+    subscription->impl->rmw_handle = rmw_create_subscription_with_context(
+      rcl_node_get_rmw_handle(node), type_support, context, remapped_topic_name,
+      &(options->qos), &(options->rmw_subscription_options));
+  } else {
+    subscription->impl->rmw_handle = rmw_create_subscription(
+      rcl_node_get_rmw_handle(node), type_support, remapped_topic_name,
+      &(options->qos), &(options->rmw_subscription_options));
+  }
   if (!subscription->impl->rmw_handle) {
     RCL_SET_ERROR_MSG(rmw_get_error_string().str);
     goto fail;
@@ -733,9 +749,11 @@ rcl_take_dynamic_message(
   return RCL_RET_OK;
 }
 
-rcl_ret_t
-rcl_take_loaned_message(
+static rcl_ret_t
+rcl_take_loaned_message_impl(
   const rcl_subscription_t * subscription,
+  const rosidl_runtime_c__message_context_t * context,
+  bool use_context,
   void ** loaned_message,
   rmw_message_info_t * message_info,
   rmw_subscription_allocation_t * allocation)
@@ -755,8 +773,15 @@ rcl_take_loaned_message(
   *message_info_local = rmw_get_zero_initialized_message_info();
   // Call rmw_take_with_info.
   bool taken = false;
-  rmw_ret_t ret = rmw_take_loaned_message_with_info(
-    subscription->impl->rmw_handle, loaned_message, &taken, message_info_local, allocation);
+  rmw_ret_t ret;
+  if (use_context) {
+    ret = rmw_take_loaned_message_with_info_and_context(
+      subscription->impl->rmw_handle, context, loaned_message, &taken,
+      message_info_local, allocation);
+  } else {
+    ret = rmw_take_loaned_message_with_info(
+      subscription->impl->rmw_handle, loaned_message, &taken, message_info_local, allocation);
+  }
   if (ret != RMW_RET_OK) {
     RCL_SET_ERROR_MSG(rmw_get_error_string().str);
     return rcl_convert_rmw_ret_to_rcl_ret(ret);
@@ -768,6 +793,29 @@ rcl_take_loaned_message(
     return RCL_RET_SUBSCRIPTION_TAKE_FAILED;
   }
   return RCL_RET_OK;
+}
+
+rcl_ret_t
+rcl_take_loaned_message(
+  const rcl_subscription_t * subscription,
+  void ** loaned_message,
+  rmw_message_info_t * message_info,
+  rmw_subscription_allocation_t * allocation)
+{
+  return rcl_take_loaned_message_impl(
+    subscription, NULL, false, loaned_message, message_info, allocation);
+}
+
+rcl_ret_t
+rcl_take_loaned_message_with_context(
+  const rcl_subscription_t * subscription,
+  const rosidl_runtime_c__message_context_t * context,
+  void ** loaned_message,
+  rmw_message_info_t * message_info,
+  rmw_subscription_allocation_t * allocation)
+{
+  return rcl_take_loaned_message_impl(
+    subscription, context, true, loaned_message, message_info, allocation);
 }
 
 rcl_ret_t

@@ -25,6 +25,7 @@ extern "C"
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "rosidl_runtime_c/message_context.h"
 #include "rosidl_runtime_c/message_type_support_struct.h"
 
 #include "rcl/allocator.h"
@@ -178,6 +179,25 @@ rcl_subscription_init(
   const char * topic_name,
   const rcl_subscription_options_t * options
 );
+
+/// Initialize a subscription with an optional endpoint-wide message context.
+/**
+ * The subscription baseline is independent of publisher constraints.
+ * Middleware retaining the context must copy it or retain its ownership.
+ * A NULL context adds no requirements; unsupported requirements fail.
+ * Other arguments are as for rcl_subscription_init().
+ * \return #RCL_RET_OK on success or an appropriate error code.
+ */
+RCL_PUBLIC
+RCL_WARN_UNUSED
+rcl_ret_t
+rcl_subscription_init_with_context(
+  rcl_subscription_t * subscription,
+  const rcl_node_t * node,
+  const rosidl_message_type_support_t * type_support,
+  const rosidl_runtime_c__message_context_t * context,
+  const char * topic_name,
+  const rcl_subscription_options_t * options);
 
 /// Finalize a rcl_subscription_t.
 /**
@@ -704,6 +724,22 @@ RCL_WARN_UNUSED
 rcl_ret_t
 rcl_take_loaned_message(
   const rcl_subscription_t * subscription,
+  void ** loaned_message,
+  rmw_message_info_t * message_info,
+  rmw_subscription_allocation_t * allocation);
+
+/// Take a loaned message with an optional context that may tighten the endpoint baseline.
+/**
+ * NULL and zero limits do not remove endpoint limits. Other arguments are as
+ * for rcl_take_loaned_message().
+ * \return #RCL_RET_OK, #RCL_RET_UNSUPPORTED, or an appropriate error code.
+ */
+RCL_PUBLIC
+RCL_WARN_UNUSED
+rcl_ret_t
+rcl_take_loaned_message_with_context(
+  const rcl_subscription_t * subscription,
+  const rosidl_runtime_c__message_context_t * context,
   void ** loaned_message,
   rmw_message_info_t * message_info,
   rmw_subscription_allocation_t * allocation);

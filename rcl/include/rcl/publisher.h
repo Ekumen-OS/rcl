@@ -25,6 +25,7 @@ extern "C"
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "rosidl_runtime_c/message_context.h"
 #include "rosidl_runtime_c/message_type_support_struct.h"
 
 #include "rcl/allocator.h"
@@ -167,6 +168,24 @@ rcl_publisher_init(
   const char * topic_name,
   const rcl_publisher_options_t * options);
 
+/// Initialize a publisher with an optional endpoint-wide message context.
+/**
+ * Middleware retaining the context must copy it or retain its ownership.
+ * A NULL context adds no requirements. Unsupported requirements fail rather
+ * than being ignored. Other arguments are as for rcl_publisher_init().
+ * \return #RCL_RET_OK on success or an appropriate error code.
+ */
+RCL_PUBLIC
+RCL_WARN_UNUSED
+rcl_ret_t
+rcl_publisher_init_with_context(
+  rcl_publisher_t * publisher,
+  const rcl_node_t * node,
+  const rosidl_message_type_support_t * type_support,
+  const rosidl_runtime_c__message_context_t * context,
+  const char * topic_name,
+  const rcl_publisher_options_t * options);
+
 /// Finalize a rcl_publisher_t.
 /**
  * After calling, the node will no longer be advertising that it is publishing
@@ -243,6 +262,21 @@ rcl_ret_t
 rcl_borrow_loaned_message(
   const rcl_publisher_t * publisher,
   const rosidl_message_type_support_t * type_support,
+  void ** ros_message);
+
+/// Borrow a message with an optional context that may tighten the endpoint baseline.
+/**
+ * NULL and zero limits do not remove endpoint limits. Other arguments are as
+ * for rcl_borrow_loaned_message().
+ * \return #RCL_RET_OK, #RCL_RET_UNSUPPORTED, or an appropriate error code.
+ */
+RCL_PUBLIC
+RCL_WARN_UNUSED
+rcl_ret_t
+rcl_borrow_loaned_message_with_context(
+  const rcl_publisher_t * publisher,
+  const rosidl_message_type_support_t * type_support,
+  const rosidl_runtime_c__message_context_t * context,
   void ** ros_message);
 
 /// Return a loaned message previously borrowed from a publisher.

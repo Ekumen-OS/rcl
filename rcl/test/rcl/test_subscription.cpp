@@ -20,6 +20,7 @@
 
 #include "rcl/subscription.h"
 #include "rcl/rcl.h"
+#include "rmw/error_handling.h"
 #include "rmw/rmw.h"
 #include "rmw/validate_full_topic_name.h"
 
@@ -700,6 +701,57 @@ TEST_F(TestSubscriptionFixture, test_subscription_loaned) {
       std::string(msg_loaned->string_value.data, msg_loaned->string_value.size));
     ret = rcl_return_loaned_message_from_subscription(&subscription, msg_loaned);
     EXPECT_EQ(RCL_RET_OK, ret) << rcl_get_error_string().str;
+  }
+}
+
+TEST_F(TestSubscriptionFixture, test_subscription_context_forwarding) {
+  const auto * ts = ROSIDL_GET_MSG_TYPE_SUPPORT(test_msgs, msg, Strings);
+  auto subscription = rcl_get_zero_initialized_subscription();
+  auto options = rcl_subscription_get_default_options();
+  rosidl_runtime_c__message_context_t baseline{};
+  baseline.constraints.max_total_size = 70;
+  size_t retained_limit = 0;
+  {
+    auto mock = mocking_utils::patch(
+      "lib:rcl", rmw_create_subscription_with_context,
+      [&](auto node, auto type_support, auto context, auto topic, auto qos, auto rmw_options) {
+        retained_limit = context->constraints.max_total_size;
+        return rmw_create_subscription(node, type_support, topic, qos, rmw_options);
+      });
+    ASSERT_EQ(RCL_RET_OK, rcl_subscription_init_with_context(
+        &subscription, node_ptr, ts, &baseline, "context_subscription", &options)) <<
+      rcl_get_error_string().str;
+  }
+  OSRF_TESTING_TOOLS_CPP_SCOPE_EXIT(
+  {
+    EXPECT_EQ(RCL_RET_OK, rcl_subscription_fini(&subscription, node_ptr));
+  });
+  baseline.constraints.max_total_size = 1;
+  ASSERT_EQ(70u, retained_limit);
+  {
+    auto mock = mocking_utils::patch(
+      "lib:rcl", rmw_take_loaned_message_with_info_and_context,
+      [&](auto, const rosidl_runtime_c__message_context_t * context, auto, bool * taken,
+      rmw_message_info_t * info, auto) {
+        EXPECT_NE(nullptr, info);
+        if (context && context->constraints.max_total_size > retained_limit) {
+          RMW_SET_ERROR_MSG("loan limit exceeds subscription baseline");
+          return RMW_RET_INVALID_ARGUMENT;
+        }
+        *taken = true;
+        return RMW_RET_OK;
+      });
+    void * loan = nullptr;
+    rosidl_runtime_c__message_context_t request{};
+    request.constraints.max_total_size = 50;
+    EXPECT_EQ(RCL_RET_OK, rcl_take_loaned_message_with_context(
+        &subscription, &request, &loan, nullptr, nullptr));
+    request.constraints.max_total_size = 71;
+    EXPECT_EQ(RCL_RET_INVALID_ARGUMENT, rcl_take_loaned_message_with_context(
+        &subscription, &request, &loan, nullptr, nullptr));
+    rcl_reset_error();
+    EXPECT_EQ(RCL_RET_OK, rcl_take_loaned_message_with_context(
+        &subscription, nullptr, &loan, nullptr, nullptr));
   }
 }
 

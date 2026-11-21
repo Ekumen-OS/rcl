@@ -26,6 +26,7 @@
 #include "rcl/error_handling.h"
 #include "rcl/node.h"
 #include "rcutils/env.h"
+#include "rmw/error_handling.h"
 #include "rmw/qos_profiles.h"
 #include "rmw/rmw.h"
 #include "rmw/validate_full_topic_name.h"
@@ -128,6 +129,54 @@ TEST_F(TestPublisherFixture, test_publisher_nominal) {
   ret = rcl_publish(&publisher, &msg, nullptr);
   test_msgs__msg__BasicTypes__fini(&msg);
   ASSERT_EQ(RCL_RET_OK, ret) << rcl_get_error_string().str;
+}
+
+TEST_F(TestPublisherFixture, test_publisher_context_forwarding) {
+  const auto * ts = ROSIDL_GET_MSG_TYPE_SUPPORT(test_msgs, msg, BasicTypes);
+  auto publisher = rcl_get_zero_initialized_publisher();
+  auto options = rcl_publisher_get_default_options();
+  rosidl_runtime_c__message_context_t baseline{};
+  baseline.constraints.max_total_size = 100;
+  size_t retained_limit = 0;
+  {
+    auto mock = mocking_utils::patch(
+      "lib:rcl", rmw_create_publisher_with_context,
+      [&](auto node, auto type_support, auto context, auto topic, auto qos, auto rmw_options) {
+        retained_limit = context->constraints.max_total_size;
+        return rmw_create_publisher(node, type_support, topic, qos, rmw_options);
+      });
+    ASSERT_EQ(RCL_RET_OK, rcl_publisher_init_with_context(
+        &publisher, node_ptr, ts, &baseline, "context_publisher", &options)) <<
+      rcl_get_error_string().str;
+  }
+  OSRF_TESTING_TOOLS_CPP_SCOPE_EXIT(
+  {
+    EXPECT_EQ(RCL_RET_OK, rcl_publisher_fini(&publisher, node_ptr));
+  });
+  baseline.constraints.max_total_size = 1;
+  ASSERT_EQ(100u, retained_limit);
+  {
+    auto mock = mocking_utils::patch(
+      "lib:rcl", rmw_borrow_loaned_message_with_context,
+      [&](auto, auto, const rosidl_runtime_c__message_context_t * context, auto) {
+        if (context && context->constraints.max_total_size > retained_limit) {
+          RMW_SET_ERROR_MSG("loan limit exceeds publisher baseline");
+          return RMW_RET_INVALID_ARGUMENT;
+        }
+        return RMW_RET_OK;
+      });
+    void * loan = nullptr;
+    rosidl_runtime_c__message_context_t request{};
+    request.constraints.max_total_size = 50;
+    EXPECT_EQ(RCL_RET_OK, rcl_borrow_loaned_message_with_context(
+        &publisher, ts, &request, &loan));
+    request.constraints.max_total_size = 101;
+    EXPECT_EQ(RCL_RET_INVALID_ARGUMENT, rcl_borrow_loaned_message_with_context(
+        &publisher, ts, &request, &loan));
+    rcl_reset_error();
+    EXPECT_EQ(RCL_RET_OK, rcl_borrow_loaned_message_with_context(
+        &publisher, ts, nullptr, &loan));
+  }
 }
 
 /* Basic nominal test of a publisher with a string.
