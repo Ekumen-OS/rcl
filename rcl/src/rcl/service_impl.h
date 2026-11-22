@@ -32,6 +32,7 @@ struct rcl_service_impl_s
   char * remapped_service_name;
   rosidl_type_hash_t type_hash;
   bool in_use_by_waitset;
+  bool uses_message_context;
 };
 
 #endif  // RCL__SERVICE_IMPL_H_

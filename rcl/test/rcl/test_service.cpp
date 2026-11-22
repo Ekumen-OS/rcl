@@ -21,6 +21,7 @@
 
 #include "osrf_testing_tools_cpp/scope_exit.hpp"
 #include "rcl/error_handling.h"
+#include "rmw/error_handling.h"
 #include "rmw/qos_profiles.h"
 #include "rmw/rmw.h"
 #include "rmw/validate_namespace.h"
@@ -70,6 +71,216 @@ public:
     EXPECT_EQ(RCL_RET_OK, ret) << rcl_get_error_string().str;
   }
 };
+
+TEST_F(TestServiceFixture, loan_requires_context_service) {
+  rcl_service_t service = rcl_get_zero_initialized_service();
+  auto options = rcl_service_get_default_options();
+  auto ts = ROSIDL_GET_SRV_TYPE_SUPPORT(test_msgs, srv, BasicTypes);
+  ASSERT_EQ(RCL_RET_OK, rcl_service_init(&service, this->node_ptr, ts, "loans", &options));
+  void * response = nullptr;
+  EXPECT_EQ(RCL_RET_UNSUPPORTED, rcl_borrow_loaned_response(&service, nullptr, &response));
+  EXPECT_EQ(nullptr, response);
+  rcl_reset_error();
+  int storage = 0;
+  response = &storage;
+  rmw_request_id_t header{};
+  EXPECT_EQ(RCL_RET_UNSUPPORTED, rcl_send_loaned_response(&service, &header, &response));
+  EXPECT_EQ(&storage, response);
+  rcl_reset_error();
+  EXPECT_EQ(RCL_RET_UNSUPPORTED, rcl_return_loaned_response_from_service(&service, &response));
+  EXPECT_EQ(&storage, response);
+  rcl_reset_error();
+  EXPECT_EQ(RCL_RET_OK, rcl_service_fini(&service, this->node_ptr));
+}
+
+TEST_F(TestServiceFixture, context_service_loan_results) {
+  rcl_service_t service = rcl_get_zero_initialized_service();
+  auto options = rcl_service_get_default_options();
+  auto ts = ROSIDL_GET_SRV_TYPE_SUPPORT(test_msgs, srv, BasicTypes);
+  {
+    auto mock = mocking_utils::patch(
+      "lib:rcl", rmw_create_service_with_context,
+      [](const rmw_node_t * node, const rosidl_service_type_support_t * type_support,
+      const rosidl_runtime_c__message_context_t *, const rosidl_runtime_c__message_context_t *,
+      const char * name, const rmw_qos_profile_t * qos) {
+        return rmw_create_service(node, type_support, name, qos);
+      });
+    ASSERT_EQ(
+      RCL_RET_OK,
+      rcl_service_init_with_context(&service, this->node_ptr, ts, nullptr, nullptr, "loans",
+      &options))
+      << rcl_get_error_string().str;
+  }
+  OSRF_TESTING_TOOLS_CPP_SCOPE_EXIT(
+  {
+    EXPECT_EQ(RCL_RET_OK, rcl_service_fini(&service, this->node_ptr));
+  });
+
+  {
+    auto mock = mocking_utils::patch(
+      "lib:rcl", rmw_destroy_service,
+      [](const rmw_node_t *, rmw_service_t *) {
+        RMW_SET_ERROR_MSG("outstanding service loans");
+        return RMW_RET_INVALID_ARGUMENT;
+      });
+    EXPECT_EQ(RCL_RET_INVALID_ARGUMENT, rcl_service_fini(&service, this->node_ptr));
+    EXPECT_TRUE(rcl_service_is_valid(&service));
+    rcl_reset_error();
+  }
+
+  rcl_clock_t clock{};
+  EXPECT_EQ(
+    RCL_RET_UNSUPPORTED, rcl_service_configure_service_introspection(
+      &service, this->node_ptr, &clock, ts, rcl_publisher_get_default_options(),
+      RCL_SERVICE_INTROSPECTION_CONTENTS));
+  rcl_reset_error();
+
+  rmw_service_info_t header{};
+  void * request = nullptr;
+  {
+    auto mock = mocking_utils::patch(
+      "lib:rcl", rmw_take_loaned_request,
+      [](const rmw_service_t *, const rosidl_runtime_c__message_context_t *,
+      rmw_service_info_t *, void **, bool * taken) {
+        *taken = false;
+        return RMW_RET_OK;
+      });
+    EXPECT_EQ(RCL_RET_SERVICE_TAKE_FAILED,
+      rcl_take_loaned_request(&service, nullptr, &header, &request));
+  }
+
+  int response_storage = 0;
+  void * response = &response_storage;
+  {
+    auto mock = mocking_utils::patch(
+      "lib:rcl", rmw_send_loaned_response,
+      [](const rmw_service_t *, const rmw_request_id_t *, void ** loan) {
+        *loan = nullptr;
+        return RMW_RET_TIMEOUT;
+      });
+    EXPECT_EQ(RCL_RET_TIMEOUT, rcl_send_loaned_response(&service, &header.request_id, &response));
+    EXPECT_EQ(nullptr, response);
+  }
+}
+
+TEST_F(TestServiceFixture, context_client_loan_results) {
+  rcl_client_t client = rcl_get_zero_initialized_client();
+  auto options = rcl_client_get_default_options();
+  auto ts = ROSIDL_GET_SRV_TYPE_SUPPORT(test_msgs, srv, BasicTypes);
+  {
+    auto mock = mocking_utils::patch(
+      "lib:rcl", rmw_create_client_with_context,
+      [](const rmw_node_t * node, const rosidl_service_type_support_t * type_support,
+      const rosidl_runtime_c__message_context_t *, const rosidl_runtime_c__message_context_t *,
+      const char * name, const rmw_qos_profile_t * qos) {
+        return rmw_create_client(node, type_support, name, qos);
+      });
+    ASSERT_EQ(
+      RCL_RET_OK,
+      rcl_client_init_with_context(&client, this->node_ptr, ts, nullptr, nullptr, "loans",
+      &options))
+      << rcl_get_error_string().str;
+  }
+  OSRF_TESTING_TOOLS_CPP_SCOPE_EXIT(
+  {
+    EXPECT_EQ(RCL_RET_OK, rcl_client_fini(&client, this->node_ptr));
+  });
+
+  {
+    auto mock = mocking_utils::patch(
+      "lib:rcl", rmw_destroy_client,
+      [](const rmw_node_t *, rmw_client_t *) {
+        RMW_SET_ERROR_MSG("outstanding client loans");
+        return RMW_RET_INVALID_ARGUMENT;
+      });
+    EXPECT_EQ(RCL_RET_INVALID_ARGUMENT, rcl_client_fini(&client, this->node_ptr));
+    EXPECT_TRUE(rcl_client_is_valid(&client));
+    rcl_reset_error();
+  }
+
+  rcl_clock_t clock{};
+  EXPECT_EQ(
+    RCL_RET_UNSUPPORTED, rcl_client_configure_service_introspection(
+      &client, this->node_ptr, &clock, ts, rcl_publisher_get_default_options(),
+      RCL_SERVICE_INTROSPECTION_CONTENTS));
+  rcl_reset_error();
+
+  rmw_service_info_t header{};
+  void * response = nullptr;
+  {
+    auto mock = mocking_utils::patch(
+      "lib:rcl", rmw_take_loaned_response,
+      [](const rmw_client_t *, const rosidl_runtime_c__message_context_t *,
+      rmw_service_info_t *, void **, bool * taken) {
+        *taken = false;
+        return RMW_RET_OK;
+      });
+    EXPECT_EQ(RCL_RET_CLIENT_TAKE_FAILED,
+      rcl_take_loaned_response(&client, nullptr, &header, &response));
+  }
+
+  int request_storage = 0;
+  void * request = &request_storage;
+  int64_t sequence_number = 0;
+  {
+    auto mock = mocking_utils::patch(
+      "lib:rcl", rmw_send_loaned_request,
+      [](const rmw_client_t *, void ** loan, int64_t * sequence) {
+        *loan = nullptr;
+        *sequence = 42;
+        return RMW_RET_OK;
+      });
+    EXPECT_EQ(RCL_RET_OK, rcl_send_loaned_request(&client, &request, &sequence_number));
+    EXPECT_EQ(nullptr, request);
+    EXPECT_EQ(42, sequence_number);
+  }
+}
+
+TEST_F(TestServiceFixture, context_endpoint_creation_does_not_fallback) {
+  auto ts = ROSIDL_GET_SRV_TYPE_SUPPORT(test_msgs, srv, BasicTypes);
+  auto client_options = rcl_client_get_default_options();
+  auto service_options = rcl_service_get_default_options();
+  rcl_client_t client = rcl_get_zero_initialized_client();
+  rcl_service_t service = rcl_get_zero_initialized_service();
+  bool ordinary_client_called = false;
+  bool ordinary_service_called = false;
+  auto mock_client = mocking_utils::patch(
+    "lib:rcl", rmw_create_client,
+    [&ordinary_client_called](auto, auto, auto, auto) -> rmw_client_t * {
+      ordinary_client_called = true;
+      return nullptr;
+    });
+  auto mock_service = mocking_utils::patch(
+    "lib:rcl", rmw_create_service,
+    [&ordinary_service_called](auto, auto, auto, auto) -> rmw_service_t * {
+      ordinary_service_called = true;
+      return nullptr;
+    });
+  auto mock_context_client = mocking_utils::patch(
+    "lib:rcl", rmw_create_client_with_context,
+    [](auto, auto, auto, auto, auto, auto) -> rmw_client_t * {
+      RMW_SET_ERROR_MSG("context clients unsupported");
+      return nullptr;
+    });
+  auto mock_context_service = mocking_utils::patch(
+    "lib:rcl", rmw_create_service_with_context,
+    [](auto, auto, auto, auto, auto, auto) -> rmw_service_t * {
+      RMW_SET_ERROR_MSG("context services unsupported");
+      return nullptr;
+    });
+  EXPECT_EQ(
+    RCL_RET_ERROR,
+    rcl_client_init_with_context(&client, this->node_ptr, ts, nullptr, nullptr, "loans",
+    &client_options));
+  EXPECT_FALSE(ordinary_client_called);
+  rcl_reset_error();
+  EXPECT_EQ(
+    RCL_RET_ERROR,
+    rcl_service_init_with_context(&service, this->node_ptr, ts, nullptr, nullptr, "loans",
+    &service_options));
+  EXPECT_FALSE(ordinary_service_called);
+  rcl_reset_error();
+}
 
 /* Basic nominal test of a service.
  */

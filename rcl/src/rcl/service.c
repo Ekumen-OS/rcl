@@ -77,13 +77,46 @@ unconfigure_service_introspection(
   return ret;
 }
 
-rcl_ret_t
-rcl_service_init(
+static rcl_ret_t
+rcl_service_init_impl(
   rcl_service_t * service,
   const rcl_node_t * node,
   const rosidl_service_type_support_t * type_support,
+  const rosidl_runtime_c__message_context_t * request_context,
+  const rosidl_runtime_c__message_context_t * response_context,
+  bool use_context,
   const char * service_name,
+  const rcl_service_options_t * options);
+
+rcl_ret_t
+rcl_service_init(
+  rcl_service_t * service, const rcl_node_t * node,
+  const rosidl_service_type_support_t * type_support, const char * service_name,
   const rcl_service_options_t * options)
+{
+  return rcl_service_init_impl(service, node, type_support, NULL, NULL, false, service_name,
+    options);
+}
+
+rcl_ret_t
+rcl_service_init_with_context(
+  rcl_service_t * service, const rcl_node_t * node,
+  const rosidl_service_type_support_t * type_support,
+  const rosidl_runtime_c__message_context_t * request_context,
+  const rosidl_runtime_c__message_context_t * response_context,
+  const char * service_name, const rcl_service_options_t * options)
+{
+  return rcl_service_init_impl(
+    service, node, type_support, request_context, response_context, true, service_name, options);
+}
+
+static rcl_ret_t
+rcl_service_init_impl(
+  rcl_service_t * service, const rcl_node_t * node,
+  const rosidl_service_type_support_t * type_support,
+  const rosidl_runtime_c__message_context_t * request_context,
+  const rosidl_runtime_c__message_context_t * response_context,
+  bool use_context, const char * service_name, const rcl_service_options_t * options)
 {
   RCUTILS_CAN_RETURN_WITH_ERROR_OF(RCL_RET_INVALID_ARGUMENT);
   RCUTILS_CAN_RETURN_WITH_ERROR_OF(RCL_RET_ALREADY_INIT);
@@ -146,11 +179,15 @@ rcl_service_init(
   // Fill out implementation struct.
   // rmw handle (create rmw service)
   // TODO(wjwwood): pass along the allocator to rmw when it supports it
-  service->impl->rmw_handle = rmw_create_service(
-    rcl_node_get_rmw_handle(node),
-    type_support,
-    service->impl->remapped_service_name,
-    &options->qos);
+  if (use_context) {
+    service->impl->rmw_handle = rmw_create_service_with_context(
+      rcl_node_get_rmw_handle(node), type_support, request_context, response_context,
+      service->impl->remapped_service_name, &options->qos);
+  } else {
+    service->impl->rmw_handle = rmw_create_service(
+      rcl_node_get_rmw_handle(node), type_support, service->impl->remapped_service_name,
+      &options->qos);
+  }
   if (!service->impl->rmw_handle) {
     RCL_SET_ERROR_MSG(rmw_get_error_string().str);
     ret = RCL_RET_ERROR;
@@ -185,6 +222,7 @@ rcl_service_init(
   // options
   service->impl->options = *options;
   service->impl->in_use_by_waitset = false;
+  service->impl->uses_message_context = use_context;
 
   if (RCL_RET_OK != rcl_node_type_cache_register_type(
       node, type_support->get_type_hash_func(type_support),
@@ -257,6 +295,9 @@ rcl_service_fini(rcl_service_t * service, rcl_node_t * node)
     rmw_ret_t ret = rmw_destroy_service(rmw_node, service->impl->rmw_handle);
     if (ret != RMW_RET_OK) {
       RCL_SET_ERROR_MSG(rmw_get_error_string().str);
+      if (service->impl->uses_message_context && ret == RMW_RET_INVALID_ARGUMENT) {
+        return RCL_RET_INVALID_ARGUMENT;
+      }
       result = RCL_RET_ERROR;
     }
 
@@ -361,6 +402,87 @@ rcl_take_request_with_info(
     }
   }
   return RCL_RET_OK;
+}
+
+static rcl_ret_t
+rcl_service_check_loan(const rcl_service_t * service)
+{
+  if (!rcl_service_is_valid(service)) {
+    return RCL_RET_SERVICE_INVALID;
+  }
+  if (!service->impl->uses_message_context) {
+    RCL_SET_ERROR_MSG("service was not initialized with message contexts");
+    return RCL_RET_UNSUPPORTED;
+  }
+  return RCL_RET_OK;
+}
+
+rcl_ret_t
+rcl_take_loaned_request(
+  const rcl_service_t * service, const rosidl_runtime_c__message_context_t * context,
+  rmw_service_info_t * header, void ** request)
+{
+  rcl_ret_t ret = rcl_service_check_loan(service);
+  if (ret != RCL_RET_OK) {
+    return ret;
+  }
+  bool taken = false;
+  rmw_ret_t rmw_ret = rmw_take_loaned_request(
+    service->impl->rmw_handle, context, header, request, &taken);
+  if (rmw_ret != RMW_RET_OK) {
+    return rcl_convert_rmw_ret_to_rcl_ret(rmw_ret);
+  }
+  return taken ? RCL_RET_OK : RCL_RET_SERVICE_TAKE_FAILED;
+}
+
+rcl_ret_t
+rcl_return_loaned_request_from_service(const rcl_service_t * service, void ** request)
+{
+  rcl_ret_t ret = rcl_service_check_loan(service);
+  if (ret != RCL_RET_OK) {
+    return ret;
+  }
+  return rcl_convert_rmw_ret_to_rcl_ret(
+    rmw_return_loaned_request_from_service(service->impl->rmw_handle, request));
+}
+
+rcl_ret_t
+rcl_borrow_loaned_response(
+  const rcl_service_t * service, const rosidl_runtime_c__message_context_t * context,
+  void ** response)
+{
+  rcl_ret_t ret = rcl_service_check_loan(service);
+  if (ret != RCL_RET_OK) {
+    return ret;
+  }
+  return rcl_convert_rmw_ret_to_rcl_ret(
+    rmw_borrow_loaned_response(service->impl->rmw_handle, context, response));
+}
+
+rcl_ret_t
+rcl_send_loaned_response(
+  const rcl_service_t * service, const rmw_request_id_t * header, void ** response)
+{
+  rcl_ret_t ret = rcl_service_check_loan(service);
+  if (ret != RCL_RET_OK) {
+    return ret;
+  }
+  rmw_ret_t rmw_ret = rmw_send_loaned_response(service->impl->rmw_handle, header, response);
+  if (rmw_ret == RMW_RET_TIMEOUT) {
+    return RCL_RET_TIMEOUT;
+  }
+  return rcl_convert_rmw_ret_to_rcl_ret(rmw_ret);
+}
+
+rcl_ret_t
+rcl_return_loaned_response_from_service(const rcl_service_t * service, void ** response)
+{
+  rcl_ret_t ret = rcl_service_check_loan(service);
+  if (ret != RCL_RET_OK) {
+    return ret;
+  }
+  return rcl_convert_rmw_ret_to_rcl_ret(
+    rmw_return_loaned_response_from_service(service->impl->rmw_handle, response));
 }
 
 rcl_ret_t
@@ -483,6 +605,11 @@ rcl_service_configure_service_introspection(
 
   if (introspection_state == RCL_SERVICE_INTROSPECTION_OFF) {
     return unconfigure_service_introspection(node, service->impl, &allocator);
+  }
+
+  if (service->impl->uses_message_context) {
+    RCL_SET_ERROR_MSG("service introspection is not supported for context services");
+    return RCL_RET_UNSUPPORTED;
   }
 
   if (service->impl->service_event_publisher == NULL) {

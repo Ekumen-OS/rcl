@@ -24,6 +24,7 @@ extern "C"
 
 #include <stdbool.h>
 
+#include "rosidl_runtime_c/message_context.h"
 #include "rosidl_runtime_c/service_type_support_struct.h"
 
 #include "rcl/allocator.h"
@@ -169,6 +170,50 @@ rcl_service_init(
   const rosidl_service_type_support_t * type_support,
   const char * service_name,
   const rcl_service_options_t * options);
+
+/// Initialize a service with independent request and response endpoint contexts.
+/** Unsupported contexts or representations are reported rather than ignored.
+ * Service introspection is not supported on services initialized this way. */
+RCL_PUBLIC
+RCL_WARN_UNUSED
+rcl_ret_t
+rcl_service_init_with_context(
+  rcl_service_t * service, const rcl_node_t * node,
+  const rosidl_service_type_support_t * type_support,
+  const rosidl_runtime_c__message_context_t * request_context,
+  const rosidl_runtime_c__message_context_t * response_context,
+  const char * service_name, const rcl_service_options_t * options);
+
+/// Loan operations require a context-initialized service and use the RMW ownership rules.
+RCL_PUBLIC
+RCL_WARN_UNUSED
+rcl_ret_t
+rcl_take_loaned_request(
+  const rcl_service_t * service, const rosidl_runtime_c__message_context_t * context,
+  rmw_service_info_t * request_header, void ** request);
+
+RCL_PUBLIC
+RCL_WARN_UNUSED
+rcl_ret_t
+rcl_return_loaned_request_from_service(const rcl_service_t * service, void ** request);
+
+RCL_PUBLIC
+RCL_WARN_UNUSED
+rcl_ret_t
+rcl_borrow_loaned_response(
+  const rcl_service_t * service, const rosidl_runtime_c__message_context_t * context,
+  void ** response);
+
+RCL_PUBLIC
+RCL_WARN_UNUSED
+rcl_ret_t
+rcl_send_loaned_response(
+  const rcl_service_t * service, const rmw_request_id_t * request_header, void ** response);
+
+RCL_PUBLIC
+RCL_WARN_UNUSED
+rcl_ret_t
+rcl_return_loaned_response_from_service(const rcl_service_t * service, void ** response);
 
 /// Finalize a rcl_service_t.
 /**

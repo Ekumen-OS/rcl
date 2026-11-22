@@ -138,6 +138,27 @@ TEST_F(TestClientFixture, test_client_nominal) {
 }
 
 
+TEST_F(TestClientFixture, loan_requires_context_client) {
+  rcl_client_t client = rcl_get_zero_initialized_client();
+  auto options = rcl_client_get_default_options();
+  auto ts = ROSIDL_GET_SRV_TYPE_SUPPORT(test_msgs, srv, BasicTypes);
+  ASSERT_EQ(RCL_RET_OK, rcl_client_init(&client, this->node_ptr, ts, "loans", &options));
+  void * request = nullptr;
+  EXPECT_EQ(RCL_RET_UNSUPPORTED, rcl_borrow_loaned_request(&client, nullptr, &request));
+  EXPECT_EQ(nullptr, request);
+  rcl_reset_error();
+  int storage = 0;
+  request = &storage;
+  int64_t sequence_number = 0;
+  EXPECT_EQ(RCL_RET_UNSUPPORTED, rcl_send_loaned_request(&client, &request, &sequence_number));
+  EXPECT_EQ(&storage, request);
+  rcl_reset_error();
+  EXPECT_EQ(RCL_RET_UNSUPPORTED, rcl_return_loaned_request_from_client(&client, &request));
+  EXPECT_EQ(&storage, request);
+  rcl_reset_error();
+  EXPECT_EQ(RCL_RET_OK, rcl_client_fini(&client, this->node_ptr));
+}
+
 /* Testing the client init and fini functions.
  */
 TEST_F(TestClientFixture, test_client_init_fini) {
