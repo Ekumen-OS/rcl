@@ -297,7 +297,7 @@ rcl_return_loaned_message_from_publisher(
   const rcl_publisher_t * publisher,
   void * loaned_message)
 {
-  if (!rcl_publisher_is_valid(publisher)) {
+  if (!rcl_publisher_is_valid_except_context(publisher)) {
     return RCL_RET_PUBLISHER_INVALID;  // error already set
   }
   RCL_CHECK_ARGUMENT_FOR_NULL(loaned_message, RCL_RET_INVALID_ARGUMENT);

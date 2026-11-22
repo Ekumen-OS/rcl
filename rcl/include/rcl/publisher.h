@@ -284,6 +284,7 @@ rcl_borrow_loaned_message_with_context(
  * The ownership of the passed in ros message will be transferred back to the middleware.
  * The middleware might deallocate and destroy the message so that the pointer is no longer
  * guaranteed to be valid after that call.
+ * A valid publisher handle may return an outstanding loan after its context is shut down.
  *
  * <hr>
  * Attribute          | Adherence
